@@ -6,10 +6,63 @@ const { v4: uuidv4 } = require("uuid");
 const app = express();
 app.use(express.json());
 
+// ── Validation helpers ───────────────────────────────────────────────────────
+
+function validateStudentId(studentId) {
+  const validPrefixes = ["IT", "EN", "BS"];
+  if (!studentId || typeof studentId !== "string") {
+    return { valid: false, message: "Student ID is required and must be a string" };
+  }
+  
+  const prefix = studentId.substring(0, 2).toUpperCase();
+  if (!validPrefixes.includes(prefix)) {
+    return { 
+      valid: false, 
+      message: `Student ID must start with IT, EN, or BS (got: ${studentId})` 
+    };
+  }
+  
+  // Check that it has exactly 8 digits after the prefix
+  const numericPart = studentId.substring(2);
+  if (!/^\d{8}$/.test(numericPart)) {
+    return { 
+      valid: false, 
+      message: `Student ID must have exactly 8 digits after the prefix (e.g., IT12345678). Got: ${studentId}` 
+    };
+  }
+  
+  return { valid: true };
+}
+
+function validateEmail(email) {
+  if (!email || typeof email !== "string") {
+    return { valid: false, message: "Email is required" };
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return { valid: false, message: "Invalid email format" };
+  }
+  return { valid: true };
+}
+
+function validateAge(age) {
+  if (age === undefined || age === null) {
+    return { valid: false, message: "Age is required" };
+  }
+  if (typeof age !== "number" || isNaN(age)) {
+    return { valid: false, message: "Age must be a valid number" };
+  }
+  if (age < 16 || age > 100) {
+    return { valid: false, message: "Age must be between 16 and 100" };
+  }
+  return { valid: true };
+}
+
 // ── In-memory store ──────────────────────────────────────────────────────────
 let students = [
-  { id: "s1", name: "Kamal Perera", email: "kamal@uni.lk", age: 22, department: "IT" },
-  { id: "s2", name: "Nimal Silva",  email: "nimal@uni.lk", age: 23, department: "CS" },
+  { id: "IT12345678", name: "Kamal Perera", email: "kamal@uni.lk", age: 22, department: "IT" },
+  { id: "EN87654321", name: "Nimal Silva",  email: "nimal@uni.lk", age: 23, department: "Engineering" },
+  { id: "BS11223344", name: "Saman Fernando", email: "saman@uni.lk", age: 21, department: "Business Studies" },
 ];
 
 // ── Swagger config ───────────────────────────────────────────────────────────
@@ -82,31 +135,101 @@ app.get("/students/:id", (req, res) => {
  *   post:
  *     tags: [Students]
  *     summary: Create a new student
+ *     description: |
+ *       Creates a new student. Validates:
+ *       - Student ID must be PREFIX + 8 digits (e.g., IT12345678, EN87654321, BS11223344)
+ *       - Email must be valid format
+ *       - Age must be between 16 and 100
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: [name, email, age, department]
+ *             required: [id, name, email, age, department]
  *             properties:
+ *               id:
+ *                 type: string
+ *                 description: Student ID (must be PREFIX + 8 digits, e.g., IT12345678)
+ *                 example: "IT12345678"
  *               name:
  *                 type: string
+ *                 example: "John Doe"
  *               email:
  *                 type: string
+ *                 format: email
+ *                 example: "john@uni.lk"
  *               age:
  *                 type: integer
+ *                 minimum: 16
+ *                 maximum: 100
+ *                 example: 22
  *               department:
  *                 type: string
+ *                 example: "IT"
  *     responses:
  *       201:
- *         description: Student created
+ *         description: Student created successfully
+ *       400:
+ *         description: Validation error
  */
 app.post("/students", (req, res) => {
-  const { name, email, age, department } = req.body;
-  if (!name || !email || !age || !department)
-    return res.status(400).json({ success: false, message: "All fields required" });
-  const newStudent = { id: uuidv4(), name, email, age, department };
+  const { id, name, email, age, department } = req.body;
+  
+  // Check required fields
+  if (!id || !name || !email || age === undefined || !department) {
+    return res.status(400).json({ 
+      success: false, 
+      message: "All fields required: id, name, email, age, department" 
+    });
+  }
+
+  // Validate student ID format
+  const idValidation = validateStudentId(id);
+  if (!idValidation.valid) {
+    return res.status(400).json({ 
+      success: false, 
+      message: idValidation.message 
+    });
+  }
+
+  // Check for duplicate ID
+  const existingStudent = students.find((s) => s.id === id);
+  if (existingStudent) {
+    return res.status(400).json({ 
+      success: false, 
+      message: `Student with ID ${id} already exists` 
+    });
+  }
+
+  // Validate email
+  const emailValidation = validateEmail(email);
+  if (!emailValidation.valid) {
+    return res.status(400).json({ 
+      success: false, 
+      message: emailValidation.message 
+    });
+  }
+
+  // Check for duplicate email
+  const existingEmail = students.find((s) => s.email === email);
+  if (existingEmail) {
+    return res.status(400).json({ 
+      success: false, 
+      message: `Email ${email} is already registered` 
+    });
+  }
+
+  // Validate age
+  const ageValidation = validateAge(age);
+  if (!ageValidation.valid) {
+    return res.status(400).json({ 
+      success: false, 
+      message: ageValidation.message 
+    });
+  }
+
+  const newStudent = { id, name, email, age, department };
   students.push(newStudent);
   res.status(201).json({ success: true, data: newStudent });
 });
@@ -117,6 +240,11 @@ app.post("/students", (req, res) => {
  *   put:
  *     tags: [Students]
  *     summary: Update a student
+ *     description: |
+ *       Updates an existing student with validation:
+ *       - Email must be valid format if provided
+ *       - Age must be between 16 and 100 if provided
+ *       - Student ID cannot be changed
  *     parameters:
  *       - in: path
  *         name: id
@@ -134,20 +262,69 @@ app.post("/students", (req, res) => {
  *                 type: string
  *               email:
  *                 type: string
+ *                 format: email
  *               age:
  *                 type: integer
+ *                 minimum: 16
+ *                 maximum: 100
  *               department:
  *                 type: string
  *     responses:
  *       200:
- *         description: Student updated
+ *         description: Student updated successfully
+ *       400:
+ *         description: Validation error
  *       404:
  *         description: Student not found
  */
 app.put("/students/:id", (req, res) => {
   const idx = students.findIndex((s) => s.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ success: false, message: "Student not found" });
-  students[idx] = { ...students[idx], ...req.body };
+  if (idx === -1) {
+    return res.status(404).json({ success: false, message: "Student not found" });
+  }
+
+  const { email, age, id } = req.body;
+
+  // Prevent ID change
+  if (id && id !== req.params.id) {
+    return res.status(400).json({ 
+      success: false, 
+      message: "Student ID cannot be changed" 
+    });
+  }
+
+  // Validate email if provided
+  if (email !== undefined) {
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: emailValidation.message 
+      });
+    }
+    
+    // Check for duplicate email (excluding current student)
+    const existingEmail = students.find((s) => s.email === email && s.id !== req.params.id);
+    if (existingEmail) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Email ${email} is already registered to another student` 
+      });
+    }
+  }
+
+  // Validate age if provided
+  if (age !== undefined) {
+    const ageValidation = validateAge(age);
+    if (!ageValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: ageValidation.message 
+      });
+    }
+  }
+
+  students[idx] = { ...students[idx], ...req.body, id: req.params.id };
   res.json({ success: true, data: students[idx] });
 });
 

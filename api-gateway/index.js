@@ -37,16 +37,16 @@ const swaggerOptions = {
       version: "1.0.0",
       description:
         "Central API Gateway exposing all microservices on a single port (3000). " +
-        "Routes: /api/students → Student Service (3001) | /api/courses → Course Service (3002) | " +
-        "/api/lecturers → Lecturer Service (3003) | /api/results → Result Service (3004)",
+        "Each service has its own ID (auto-generated UUID) and user-provided IDs (studentID, courseID, lecturerID). " +
+        "Start each service manually with 'npm start' in their respective folders.",
     },
     servers: [{ url: "http://localhost:3000", description: "API Gateway" }],
     tags: [
-      { name: "Students",  description: "Student Service endpoints (proxied to :3001)" },
-      { name: "Courses",   description: "Course Service endpoints (proxied to :3002)"   },
-      { name: "Lecturers", description: "Lecturer Service endpoints (proxied to :3003)" },
-      { name: "Results",   description: "Result Service endpoints (proxied to :3004)"   },
-      { name: "Payments",  description: "Payment Service endpoints (proxied to :3005)"  },
+      { name: "Students",  description: "Student Service (port 3001) - studentID: IT/EN/BS + 8 digits" },
+      { name: "Courses",   description: "Course Service (port 3002) - courseID: IT/EN/BS + 4 digits" },
+      { name: "Lecturers", description: "Lecturer Service (port 3003) - lecturerID: IT/EN/BS + 4 digits" },
+      { name: "Results",   description: "Result Service (port 3004) - Grade auto-calculated from marks" },
+      { name: "Payments",  description: "Payment Service (port 3005) - Status: Paid/Pending/Overdue" },
     ],
   },
   apis: ["./index.js"],
@@ -62,24 +62,39 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  * /api/students:
  *   get:
  *     tags: [Students]
- *     summary: Get all students (via gateway)
+ *     summary: Get all students
  *     responses:
  *       200:
  *         description: List of students
  *   post:
  *     tags: [Students]
- *     summary: Create a student (via gateway)
+ *     summary: Create a student
+ *     description: |
+ *       ID is auto-generated (UUID). studentID must be IT/EN/BS + 8 digits.
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [studentID, name, email, age, department]
  *             properties:
- *               name: { type: string }
- *               email: { type: string }
- *               age: { type: integer }
- *               department: { type: string }
+ *               studentID:
+ *                 type: string
+ *                 description: IT/EN/BS + 8 digits
+ *                 example: "IT99887766"
+ *               name:
+ *                 type: string
+ *                 example: "John Doe"
+ *               email:
+ *                 type: string
+ *                 example: "john@uni.lk"
+ *               age:
+ *                 type: integer
+ *                 example: 22
+ *               department:
+ *                 type: string
+ *                 example: "IT"
  *     responses:
  *       201:
  *         description: Student created
@@ -90,18 +105,19 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  * /api/students/{id}:
  *   get:
  *     tags: [Students]
- *     summary: Get student by ID (via gateway)
+ *     summary: Get student by ID (UUID)
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema: { type: string }
+ *         description: Auto-generated UUID
  *     responses:
  *       200:
  *         description: Student found
  *   put:
  *     tags: [Students]
- *     summary: Update student (via gateway)
+ *     summary: Update student
  *     parameters:
  *       - in: path
  *         name: id
@@ -123,7 +139,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *         description: Student updated
  *   delete:
  *     tags: [Students]
- *     summary: Delete student (via gateway)
+ *     summary: Delete student
  *     parameters:
  *       - in: path
  *         name: id
@@ -136,27 +152,57 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 /**
  * @swagger
+ * /api/students/by-student-id/{studentID}:
+ *   get:
+ *     tags: [Students]
+ *     summary: Get student by studentID (user-provided)
+ *     parameters:
+ *       - in: path
+ *         name: studentID
+ *         required: true
+ *         schema: { type: string }
+ *         description: IT/EN/BS + 8 digits
+ *         example: "IT12345678"
+ *     responses:
+ *       200:
+ *         description: Student found
+ */
+
+/**
+ * @swagger
  * /api/courses:
  *   get:
  *     tags: [Courses]
- *     summary: Get all courses (via gateway)
+ *     summary: Get all courses
  *     responses:
  *       200:
  *         description: List of courses
  *   post:
  *     tags: [Courses]
- *     summary: Create a course (via gateway)
+ *     summary: Create a course
+ *     description: |
+ *       ID is auto-generated (UUID). courseID must be IT/EN/BS + 4 digits.
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [courseID, title, credits, department]
  *             properties:
- *               code: { type: string }
- *               title: { type: string }
- *               credits: { type: integer }
- *               department: { type: string }
+ *               courseID:
+ *                 type: string
+ *                 description: IT/EN/BS + 4 digits
+ *                 example: "IT4021"
+ *               title:
+ *                 type: string
+ *                 example: "Advanced Programming"
+ *               credits:
+ *                 type: integer
+ *                 example: 3
+ *               department:
+ *                 type: string
+ *                 example: "IT"
  *     responses:
  *       201:
  *         description: Course created
@@ -167,7 +213,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  * /api/courses/{id}:
  *   get:
  *     tags: [Courses]
- *     summary: Get course by ID (via gateway)
+ *     summary: Get course by ID (UUID)
  *     parameters:
  *       - in: path
  *         name: id
@@ -178,7 +224,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *         description: Course found
  *   put:
  *     tags: [Courses]
- *     summary: Update course (via gateway)
+ *     summary: Update course
  *     parameters:
  *       - in: path
  *         name: id
@@ -191,7 +237,6 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *           schema:
  *             type: object
  *             properties:
- *               code: { type: string }
  *               title: { type: string }
  *               credits: { type: integer }
  *               department: { type: string }
@@ -200,7 +245,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *         description: Course updated
  *   delete:
  *     tags: [Courses]
- *     summary: Delete course (via gateway)
+ *     summary: Delete course
  *     parameters:
  *       - in: path
  *         name: id
@@ -213,27 +258,60 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 /**
  * @swagger
+ * /api/courses/by-course-id/{courseID}:
+ *   get:
+ *     tags: [Courses]
+ *     summary: Get course by courseID (user-provided)
+ *     parameters:
+ *       - in: path
+ *         name: courseID
+ *         required: true
+ *         schema: { type: string }
+ *         description: IT/EN/BS + 4 digits
+ *         example: "IT4020"
+ *     responses:
+ *       200:
+ *         description: Course found
+ */
+
+/**
+ * @swagger
  * /api/lecturers:
  *   get:
  *     tags: [Lecturers]
- *     summary: Get all lecturers (via gateway)
+ *     summary: Get all lecturers
  *     responses:
  *       200:
  *         description: List of lecturers
  *   post:
  *     tags: [Lecturers]
- *     summary: Create a lecturer (via gateway)
+ *     summary: Create a lecturer
+ *     description: |
+ *       ID is auto-generated (UUID). lecturerID must be IT/EN/BS + 4 digits.
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [lecturerID, name, email, specialization, department]
  *             properties:
- *               name: { type: string }
- *               email: { type: string }
- *               specialization: { type: string }
- *               department: { type: string }
+ *               lecturerID:
+ *                 type: string
+ *                 description: IT/EN/BS + 4 digits
+ *                 example: "IT1002"
+ *               name:
+ *                 type: string
+ *                 example: "Dr. John Smith"
+ *               email:
+ *                 type: string
+ *                 example: "john@uni.lk"
+ *               specialization:
+ *                 type: string
+ *                 example: "Artificial Intelligence"
+ *               department:
+ *                 type: string
+ *                 example: "IT"
  *     responses:
  *       201:
  *         description: Lecturer created
@@ -244,7 +322,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  * /api/lecturers/{id}:
  *   get:
  *     tags: [Lecturers]
- *     summary: Get lecturer by ID (via gateway)
+ *     summary: Get lecturer by ID (UUID)
  *     parameters:
  *       - in: path
  *         name: id
@@ -255,7 +333,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *         description: Lecturer found
  *   put:
  *     tags: [Lecturers]
- *     summary: Update lecturer (via gateway)
+ *     summary: Update lecturer
  *     parameters:
  *       - in: path
  *         name: id
@@ -277,7 +355,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *         description: Lecturer updated
  *   delete:
  *     tags: [Lecturers]
- *     summary: Delete lecturer (via gateway)
+ *     summary: Delete lecturer
  *     parameters:
  *       - in: path
  *         name: id
@@ -290,31 +368,68 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 /**
  * @swagger
+ * /api/lecturers/by-lecturer-id/{lecturerID}:
+ *   get:
+ *     tags: [Lecturers]
+ *     summary: Get lecturer by lecturerID (user-provided)
+ *     parameters:
+ *       - in: path
+ *         name: lecturerID
+ *         required: true
+ *         schema: { type: string }
+ *         description: IT/EN/BS + 4 digits
+ *         example: "IT1001"
+ *     responses:
+ *       200:
+ *         description: Lecturer found
+ */
+
+/**
+ * @swagger
  * /api/results:
  *   get:
  *     tags: [Results]
- *     summary: Get all results (via gateway)
+ *     summary: Get all results
  *     responses:
  *       200:
  *         description: List of results
  *   post:
  *     tags: [Results]
- *     summary: Create a result (via gateway)
+ *     summary: Create a result
+ *     description: |
+ *       Grade is AUTO-CALCULATED from marks:
+ *       - A+: 90-100, A: 80-89, A-: 75-79
+ *       - B+: 70-74, B: 65-69, B-: 60-64
+ *       - C+: 55-59, C: 45-54, C-: below 45
+ *       
+ *       studentID and courseID must already exist in their respective services.
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [studentID, courseID, marks, semester]
  *             properties:
- *               studentId: { type: string }
- *               courseId: { type: string }
- *               grade: { type: string }
- *               marks: { type: integer }
- *               semester: { type: string }
+ *               studentID:
+ *                 type: string
+ *                 description: Must exist in Student Service
+ *                 example: "IT12345678"
+ *               courseID:
+ *                 type: string
+ *                 description: Must exist in Course Service
+ *                 example: "IT4020"
+ *               marks:
+ *                 type: number
+ *                 description: 0-100, grade auto-calculated
+ *                 example: 85
+ *               semester:
+ *                 type: string
+ *                 enum: [y1s1, y1s2, y2s1, y2s2, y3s1, y3s2, y4s1, y4s2]
+ *                 example: "y1s1"
  *     responses:
  *       201:
- *         description: Result created
+ *         description: Result created with auto-calculated grade
  */
 
 /**
@@ -322,7 +437,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  * /api/results/{id}:
  *   get:
  *     tags: [Results]
- *     summary: Get result by ID (via gateway)
+ *     summary: Get result by ID
  *     parameters:
  *       - in: path
  *         name: id
@@ -333,7 +448,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *         description: Result found
  *   put:
  *     tags: [Results]
- *     summary: Update result (via gateway)
+ *     summary: Update result (grade auto-recalculated if marks change)
  *     parameters:
  *       - in: path
  *         name: id
@@ -346,15 +461,16 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *           schema:
  *             type: object
  *             properties:
- *               grade: { type: string }
- *               marks: { type: integer }
+ *               marks:
+ *                 type: number
+ *                 description: Grade will be auto-recalculated
  *               semester: { type: string }
  *     responses:
  *       200:
  *         description: Result updated
  *   delete:
  *     tags: [Results]
- *     summary: Delete result (via gateway)
+ *     summary: Delete result
  *     parameters:
  *       - in: path
  *         name: id
@@ -367,15 +483,16 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 /**
  * @swagger
- * /api/results/student/{studentId}:
+ * /api/results/student/{studentID}:
  *   get:
  *     tags: [Results]
- *     summary: Get all results for a student (via gateway)
+ *     summary: Get all results for a student
  *     parameters:
  *       - in: path
- *         name: studentId
+ *         name: studentID
  *         required: true
  *         schema: { type: string }
+ *         example: "IT12345678"
  *     responses:
  *       200:
  *         description: Student results
@@ -383,29 +500,65 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 /**
  * @swagger
+ * /api/results/calculate-grade/{marks}:
+ *   get:
+ *     tags: [Results]
+ *     summary: Calculate grade from marks (utility endpoint)
+ *     parameters:
+ *       - in: path
+ *         name: marks
+ *         required: true
+ *         schema: { type: number }
+ *         example: 85
+ *     responses:
+ *       200:
+ *         description: Calculated grade with grading scale
+ */
+
+/**
+ * @swagger
  * /api/payments:
  *   get:
  *     tags: [Payments]
- *     summary: Get all payments (via gateway)
+ *     summary: Get all payments
  *     responses:
  *       200:
  *         description: List of payments
  *   post:
  *     tags: [Payments]
- *     summary: Create a payment record (via gateway)
+ *     summary: Create a payment record
+ *     description: |
+ *       Status must be Paid, Pending, or Overdue.
+ *       paidDate is required when status is "Paid".
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [studentID, amount, status, semester, description]
  *             properties:
- *               studentId: { type: string }
- *               amount: { type: number }
- *               status: { type: string }
- *               semester: { type: string }
- *               paidDate: { type: string }
- *               description: { type: string }
+ *               studentID:
+ *                 type: string
+ *                 example: "IT12345678"
+ *               amount:
+ *                 type: number
+ *                 example: 75000.00
+ *               status:
+ *                 type: string
+ *                 enum: [Paid, Pending, Overdue]
+ *                 example: "Pending"
+ *               semester:
+ *                 type: string
+ *                 description: Format YYYY/S1 or YYYY/S2
+ *                 example: "2026/S1"
+ *               paidDate:
+ *                 type: string
+ *                 description: Required if status is "Paid"
+ *                 example: "2026-01-15"
+ *               description:
+ *                 type: string
+ *                 example: "Semester Fee"
  *     responses:
  *       201:
  *         description: Payment created
@@ -416,7 +569,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  * /api/payments/{id}:
  *   get:
  *     tags: [Payments]
- *     summary: Get payment by ID (via gateway)
+ *     summary: Get payment by ID
  *     parameters:
  *       - in: path
  *         name: id
@@ -427,7 +580,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *         description: Payment found
  *   put:
  *     tags: [Payments]
- *     summary: Update payment (via gateway)
+ *     summary: Update payment
  *     parameters:
  *       - in: path
  *         name: id
@@ -441,7 +594,9 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *             type: object
  *             properties:
  *               amount: { type: number }
- *               status: { type: string }
+ *               status:
+ *                 type: string
+ *                 enum: [Paid, Pending, Overdue]
  *               paidDate: { type: string }
  *               description: { type: string }
  *     responses:
@@ -449,7 +604,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *         description: Payment updated
  *   delete:
  *     tags: [Payments]
- *     summary: Delete payment (via gateway)
+ *     summary: Delete payment
  *     parameters:
  *       - in: path
  *         name: id
@@ -462,15 +617,16 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 /**
  * @swagger
- * /api/payments/student/{studentId}:
+ * /api/payments/student/{studentID}:
  *   get:
  *     tags: [Payments]
- *     summary: Get all payments for a student (via gateway)
+ *     summary: Get all payments for a student
  *     parameters:
  *       - in: path
- *         name: studentId
+ *         name: studentID
  *         required: true
  *         schema: { type: string }
+ *         example: "IT12345678"
  *     responses:
  *       200:
  *         description: Student payments
@@ -481,12 +637,14 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  * /api/payments/status/{status}:
  *   get:
  *     tags: [Payments]
- *     summary: Get payments by status - Paid / Pending / Overdue (via gateway)
+ *     summary: Get payments by status
  *     parameters:
  *       - in: path
  *         name: status
  *         required: true
- *         schema: { type: string }
+ *         schema:
+ *           type: string
+ *           enum: [Paid, Pending, Overdue]
  *     responses:
  *       200:
  *         description: Payments filtered by status
@@ -497,14 +655,23 @@ app.get("/", (req, res) => {
   res.json({
     message: "University Management System — API Gateway",
     version: "1.0.0",
+    description: "Start each service manually with 'npm start' in their folders",
     routes: {
-      students:  "/api/students  → http://localhost:3001",
-      courses:   "/api/courses   → http://localhost:3002",
-      lecturers: "/api/lecturers → http://localhost:3003",
-      results:   "/api/results   → http://localhost:3004",
-      payments:  "/api/payments  → http://localhost:3005",
+      students:  "/api/students  → http://localhost:3001 (studentID: IT/EN/BS + 8 digits)",
+      courses:   "/api/courses   → http://localhost:3002 (courseID: IT/EN/BS + 4 digits)",
+      lecturers: "/api/lecturers → http://localhost:3003 (lecturerID: IT/EN/BS + 4 digits)",
+      results:   "/api/results   → http://localhost:3004 (grade auto-calculated from marks)",
+      payments:  "/api/payments  → http://localhost:3005 (status: Paid/Pending/Overdue)",
     },
     swagger: "http://localhost:3000/api-docs",
+    startup: {
+      step1: "cd student-service && npm start",
+      step2: "cd course-service && npm start",
+      step3: "cd lecturer-service && npm start",
+      step4: "cd result-service && npm start",
+      step5: "cd payment-service && npm start",
+      step6: "cd api-gateway && npm start",
+    }
   });
 });
 
@@ -517,9 +684,10 @@ app.listen(PORT, () => {
   console.log(`✅ API Gateway running on http://localhost:${PORT}`);
   console.log(`📄 Gateway Swagger:  http://localhost:${PORT}/api-docs`);
   console.log(`\n📡 Routing table:`);
-  console.log(`   /api/students  → Student Service  :3001`);
-  console.log(`   /api/courses   → Course Service   :3002`);
-  console.log(`   /api/lecturers → Lecturer Service :3003`);
-  console.log(`   /api/results   → Result Service   :3004`);
-  console.log(`   /api/payments  → Payment Service  :3005`);
+  console.log(`   /api/students  → Student Service  :3001 (studentID: IT/EN/BS + 8 digits)`);
+  console.log(`   /api/courses   → Course Service   :3002 (courseID: IT/EN/BS + 4 digits)`);
+  console.log(`   /api/lecturers → Lecturer Service :3003 (lecturerID: IT/EN/BS + 4 digits)`);
+  console.log(`   /api/results   → Result Service   :3004 (grade auto-calculated)`);
+  console.log(`   /api/payments  → Payment Service  :3005 (status: Paid/Pending/Overdue)`);
+  console.log(`\n🚀 Start each service manually with 'npm start' in their folders`);
 });

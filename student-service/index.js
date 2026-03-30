@@ -8,26 +8,26 @@ app.use(express.json());
 
 // ── Validation helpers ───────────────────────────────────────────────────────
 
-function validateStudentId(studentId) {
+function validateStudentID(studentID) {
   const validPrefixes = ["IT", "EN", "BS"];
-  if (!studentId || typeof studentId !== "string") {
-    return { valid: false, message: "Student ID is required and must be a string" };
+  if (!studentID || typeof studentID !== "string") {
+    return { valid: false, message: "studentID is required and must be a string" };
   }
   
-  const prefix = studentId.substring(0, 2).toUpperCase();
+  const prefix = studentID.substring(0, 2).toUpperCase();
   if (!validPrefixes.includes(prefix)) {
     return { 
       valid: false, 
-      message: `Student ID must start with IT, EN, or BS (got: ${studentId})` 
+      message: `studentID must start with IT, EN, or BS (got: ${studentID})` 
     };
   }
   
   // Check that it has exactly 8 digits after the prefix
-  const numericPart = studentId.substring(2);
+  const numericPart = studentID.substring(2);
   if (!/^\d{8}$/.test(numericPart)) {
     return { 
       valid: false, 
-      message: `Student ID must have exactly 8 digits after the prefix (e.g., IT12345678). Got: ${studentId}` 
+      message: `studentID must have exactly 8 digits after the prefix (e.g., IT12345678). Got: ${studentID}` 
     };
   }
   
@@ -60,9 +60,9 @@ function validateAge(age) {
 
 // ── In-memory store ──────────────────────────────────────────────────────────
 let students = [
-  { id: "IT12345678", name: "Kamal Perera", email: "kamal@uni.lk", age: 22, department: "IT" },
-  { id: "EN87654321", name: "Nimal Silva",  email: "nimal@uni.lk", age: 23, department: "Engineering" },
-  { id: "BS11223344", name: "Saman Fernando", email: "saman@uni.lk", age: 21, department: "Business Studies" },
+  { id: uuidv4(), studentID: "IT12345678", name: "Kamal Perera", email: "kamal@uni.lk", age: 22, department: "IT" },
+  { id: uuidv4(), studentID: "EN87654321", name: "Nimal Silva",  email: "nimal@uni.lk", age: 23, department: "Engineering" },
+  { id: uuidv4(), studentID: "BS11223344", name: "Saman Fernando", email: "saman@uni.lk", age: 21, department: "Business Studies" },
 ];
 
 // ── Swagger config ───────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ const swaggerOptions = {
     info: {
       title: "Student Service API",
       version: "1.0.0",
-      description: "Microservice for managing university students",
+      description: "Microservice for managing university students. ID is auto-generated, studentID is user-provided.",
     },
     servers: [{ url: "http://localhost:3001", description: "Direct" }],
   },
@@ -110,13 +110,14 @@ app.get("/students", (req, res) => {
  * /students/{id}:
  *   get:
  *     tags: [Students]
- *     summary: Get a student by ID
+ *     summary: Get a student by ID (auto-generated UUID)
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
  *           type: string
+ *         description: Auto-generated UUID
  *     responses:
  *       200:
  *         description: Student found
@@ -131,13 +132,39 @@ app.get("/students/:id", (req, res) => {
 
 /**
  * @swagger
+ * /students/by-student-id/{studentID}:
+ *   get:
+ *     tags: [Students]
+ *     summary: Get a student by studentID (user-provided, e.g., IT12345678)
+ *     parameters:
+ *       - in: path
+ *         name: studentID
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: User-provided studentID (IT/EN/BS + 8 digits)
+ *         example: "IT12345678"
+ *     responses:
+ *       200:
+ *         description: Student found
+ *       404:
+ *         description: Student not found
+ */
+app.get("/students/by-student-id/:studentID", (req, res) => {
+  const student = students.find((s) => s.studentID === req.params.studentID);
+  if (!student) return res.status(404).json({ success: false, message: "Student not found" });
+  res.json({ success: true, data: student });
+});
+
+/**
+ * @swagger
  * /students:
  *   post:
  *     tags: [Students]
  *     summary: Create a new student
  *     description: |
- *       Creates a new student. Validates:
- *       - Student ID must be PREFIX + 8 digits (e.g., IT12345678, EN87654321, BS11223344)
+ *       Creates a new student. ID is auto-generated (UUID). Validates:
+ *       - studentID must be PREFIX + 8 digits (e.g., IT12345678, EN87654321, BS11223344)
  *       - Email must be valid format
  *       - Age must be between 16 and 100
  *     requestBody:
@@ -146,12 +173,12 @@ app.get("/students/:id", (req, res) => {
  *         application/json:
  *           schema:
  *             type: object
- *             required: [id, name, email, age, department]
+ *             required: [studentID, name, email, age, department]
  *             properties:
- *               id:
+ *               studentID:
  *                 type: string
- *                 description: Student ID (must be PREFIX + 8 digits, e.g., IT12345678)
- *                 example: "IT12345678"
+ *                 description: Student ID (must be IT/EN/BS + 8 digits, e.g., IT12345678)
+ *                 example: "IT99887766"
  *               name:
  *                 type: string
  *                 example: "John Doe"
@@ -174,18 +201,18 @@ app.get("/students/:id", (req, res) => {
  *         description: Validation error
  */
 app.post("/students", (req, res) => {
-  const { id, name, email, age, department } = req.body;
+  const { studentID, name, email, age, department } = req.body;
   
   // Check required fields
-  if (!id || !name || !email || age === undefined || !department) {
+  if (!studentID || !name || !email || age === undefined || !department) {
     return res.status(400).json({ 
       success: false, 
-      message: "All fields required: id, name, email, age, department" 
+      message: "All fields required: studentID, name, email, age, department" 
     });
   }
 
-  // Validate student ID format
-  const idValidation = validateStudentId(id);
+  // Validate studentID format
+  const idValidation = validateStudentID(studentID);
   if (!idValidation.valid) {
     return res.status(400).json({ 
       success: false, 
@@ -193,12 +220,12 @@ app.post("/students", (req, res) => {
     });
   }
 
-  // Check for duplicate ID
-  const existingStudent = students.find((s) => s.id === id);
+  // Check for duplicate studentID
+  const existingStudent = students.find((s) => s.studentID === studentID);
   if (existingStudent) {
     return res.status(400).json({ 
       success: false, 
-      message: `Student with ID ${id} already exists` 
+      message: `Student with studentID ${studentID} already exists` 
     });
   }
 
@@ -229,7 +256,7 @@ app.post("/students", (req, res) => {
     });
   }
 
-  const newStudent = { id, name, email, age, department };
+  const newStudent = { id: uuidv4(), studentID, name, email, age, department };
   students.push(newStudent);
   res.status(201).json({ success: true, data: newStudent });
 });
@@ -244,13 +271,14 @@ app.post("/students", (req, res) => {
  *       Updates an existing student with validation:
  *       - Email must be valid format if provided
  *       - Age must be between 16 and 100 if provided
- *       - Student ID cannot be changed
+ *       - ID and studentID cannot be changed
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
  *           type: string
+ *         description: Auto-generated UUID
  *     requestBody:
  *       required: true
  *       content:
@@ -283,13 +311,21 @@ app.put("/students/:id", (req, res) => {
     return res.status(404).json({ success: false, message: "Student not found" });
   }
 
-  const { email, age, id } = req.body;
+  const { email, age, id, studentID } = req.body;
 
   // Prevent ID change
   if (id && id !== req.params.id) {
     return res.status(400).json({ 
       success: false, 
-      message: "Student ID cannot be changed" 
+      message: "ID cannot be changed" 
+    });
+  }
+
+  // Prevent studentID change
+  if (studentID && studentID !== students[idx].studentID) {
+    return res.status(400).json({ 
+      success: false, 
+      message: "studentID cannot be changed" 
     });
   }
 
@@ -324,7 +360,7 @@ app.put("/students/:id", (req, res) => {
     }
   }
 
-  students[idx] = { ...students[idx], ...req.body, id: req.params.id };
+  students[idx] = { ...students[idx], ...req.body, id: req.params.id, studentID: students[idx].studentID };
   res.json({ success: true, data: students[idx] });
 });
 

@@ -6,10 +6,98 @@ const { v4: uuidv4 } = require("uuid");
 const app = express();
 app.use(express.json());
 
+// ── Validation helpers ───────────────────────────────────────────────────────
+
+const VALID_STATUSES = ["Paid", "Pending", "Overdue"];
+
+function validateStudentID(studentID) {
+  const validPrefixes = ["IT", "EN", "BS"];
+  if (!studentID || typeof studentID !== "string") {
+    return { valid: false, message: "studentID is required and must be a string" };
+  }
+  
+  const prefix = studentID.substring(0, 2).toUpperCase();
+  if (!validPrefixes.includes(prefix)) {
+    return { 
+      valid: false, 
+      message: `studentID must start with IT, EN, or BS (got: ${studentID})` 
+    };
+  }
+  
+  // Check that it has exactly 8 digits after the prefix
+  const numericPart = studentID.substring(2);
+  if (!/^\d{8}$/.test(numericPart)) {
+    return { 
+      valid: false, 
+      message: `studentID must have exactly 8 digits after the prefix (e.g., IT12345678). Got: ${studentID}` 
+    };
+  }
+  
+  return { valid: true };
+}
+
+function validateAmount(amount) {
+  if (amount === undefined || amount === null) {
+    return { valid: false, message: "Amount is required" };
+  }
+  if (typeof amount !== "number" || isNaN(amount)) {
+    return { valid: false, message: "Amount must be a valid number" };
+  }
+  if (amount <= 0) {
+    return { valid: false, message: "Amount must be greater than 0" };
+  }
+  return { valid: true };
+}
+
+function validateStatus(status) {
+  if (!status || typeof status !== "string") {
+    return { valid: false, message: "Status is required" };
+  }
+  
+  // Case-insensitive check but return normalized value
+  const statusCapitalized = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+  if (!VALID_STATUSES.includes(statusCapitalized)) {
+    return { 
+      valid: false, 
+      message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")} (case-insensitive). Got: ${status}` 
+    };
+  }
+  
+  return { valid: true, normalized: statusCapitalized };
+}
+
+function validatePaidDate(paidDate, status) {
+  if (status === "Paid" && !paidDate) {
+    return { valid: false, message: "paidDate is required when status is 'Paid'" };
+  }
+  if (paidDate) {
+    const date = new Date(paidDate);
+    if (isNaN(date.getTime())) {
+      return { valid: false, message: "paidDate must be a valid date format (e.g., 2026-01-15)" };
+    }
+  }
+  return { valid: true };
+}
+
+function validateSemester(semester) {
+  if (!semester || typeof semester !== "string") {
+    return { valid: false, message: "Semester is required" };
+  }
+  // Semester format: YYYY/S1 or YYYY/S2
+  if (!/^\d{4}\/S[12]$/.test(semester)) {
+    return { 
+      valid: false, 
+      message: `Semester must be in format YYYY/S1 or YYYY/S2 (e.g., 2026/S1). Got: ${semester}` 
+    };
+  }
+  return { valid: true };
+}
+
 // ── In-memory store ──────────────────────────────────────────────────────────
 let payments = [
-  { id: "pay1", studentId: "s1", amount: 75000.00, status: "Paid",    semester: "2026/S1", paidDate: "2026-01-15", description: "Semester Fee" },
-  { id: "pay2", studentId: "s2", amount: 75000.00, status: "Pending", semester: "2026/S1", paidDate: null,         description: "Semester Fee" },
+  { id: uuidv4(), studentID: "IT12345678", amount: 75000.00, status: "Paid",    semester: "2026/S1", paidDate: "2026-01-15", description: "Semester Fee" },
+  { id: uuidv4(), studentID: "EN87654321", amount: 75000.00, status: "Pending", semester: "2026/S1", paidDate: null,         description: "Semester Fee" },
+  { id: uuidv4(), studentID: "BS11223344", amount: 50000.00, status: "Overdue", semester: "2025/S2", paidDate: null,         description: "Library Fee" },
 ];
 
 // ── Swagger config ───────────────────────────────────────────────────────────
@@ -78,22 +166,23 @@ app.get("/payments/:id", (req, res) => {
 
 /**
  * @swagger
- * /payments/student/{studentId}:
+ * /payments/student/{studentID}:
  *   get:
  *     tags: [Payments]
  *     summary: Get all payments for a student
  *     parameters:
  *       - in: path
- *         name: studentId
+ *         name: studentID
  *         required: true
  *         schema:
  *           type: string
+ *         example: "IT12345678"
  *     responses:
  *       200:
  *         description: Payments for the student
  */
-app.get("/payments/student/:studentId", (req, res) => {
-  const studentPayments = payments.filter((p) => p.studentId === req.params.studentId);
+app.get("/payments/student/:studentID", (req, res) => {
+  const studentPayments = payments.filter((p) => p.studentID === req.params.studentID);
   res.json({ success: true, data: studentPayments });
 });
 
@@ -127,37 +216,116 @@ app.get("/payments/status/:status", (req, res) => {
  *   post:
  *     tags: [Payments]
  *     summary: Create a new payment record
+ *     description: |
+ *       Creates a new payment record. Validates:
+ *       - studentID must be PREFIX + 8 digits (e.g., IT12345678)
+ *       - Amount must be greater than 0
+ *       - Status must be Paid, Pending, or Overdue
+ *       - paidDate is required when status is "Paid"
+ *       - Semester format: YYYY/S1 or YYYY/S2
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: [studentId, amount, status, semester, description]
+ *             required: [studentID, amount, status, semester, description]
  *             properties:
- *               studentId:
+ *               studentID:
  *                 type: string
+ *                 description: Must exist in Student Service
+ *                 example: "IT12345678"
  *               amount:
  *                 type: number
+ *                 minimum: 0.01
+ *                 example: 75000.00
  *               status:
  *                 type: string
  *                 enum: [Paid, Pending, Overdue]
+ *                 example: "Pending"
  *               semester:
  *                 type: string
+ *                 description: Format YYYY/S1 or YYYY/S2
+ *                 example: "2026/S1"
  *               paidDate:
  *                 type: string
  *                 nullable: true
+ *                 description: Required if status is "Paid"
+ *                 example: "2026-01-15"
  *               description:
  *                 type: string
+ *                 example: "Semester Fee"
  *     responses:
  *       201:
  *         description: Payment created
+ *       400:
+ *         description: Validation error
  */
 app.post("/payments", (req, res) => {
-  const { studentId, amount, status, semester, paidDate, description } = req.body;
-  if (!studentId || !amount || !status || !semester || !description)
-    return res.status(400).json({ success: false, message: "All fields required" });
-  const newPayment = { id: uuidv4(), studentId, amount, status, semester, paidDate: paidDate || null, description };
+  const { studentID, amount, status, semester, paidDate, description } = req.body;
+  
+  // Check required fields
+  if (!studentID || amount === undefined || !status || !semester || !description) {
+    return res.status(400).json({ 
+      success: false, 
+      message: "All fields required: studentID, amount, status, semester, description" 
+    });
+  }
+
+  // Validate studentID format
+  const studentIDValidation = validateStudentID(studentID);
+  if (!studentIDValidation.valid) {
+    return res.status(400).json({ 
+      success: false, 
+      message: studentIDValidation.message 
+    });
+  }
+
+  // Validate amount
+  const amountValidation = validateAmount(amount);
+  if (!amountValidation.valid) {
+    return res.status(400).json({ 
+      success: false, 
+      message: amountValidation.message 
+    });
+  }
+
+  // Validate status
+  const statusValidation = validateStatus(status);
+  if (!statusValidation.valid) {
+    return res.status(400).json({ 
+      success: false, 
+      message: statusValidation.message 
+    });
+  }
+
+  // Validate semester format
+  const semesterValidation = validateSemester(semester);
+  if (!semesterValidation.valid) {
+    return res.status(400).json({ 
+      success: false, 
+      message: semesterValidation.message 
+    });
+  }
+
+  // Validate paidDate
+  const paidDateValidation = validatePaidDate(paidDate, statusValidation.normalized);
+  if (!paidDateValidation.valid) {
+    return res.status(400).json({ 
+      success: false, 
+      message: paidDateValidation.message 
+    });
+  }
+
+  const newPayment = { 
+    id: uuidv4(), 
+    studentID, 
+    amount, 
+    status: statusValidation.normalized, 
+    semester, 
+    paidDate: paidDate || null, 
+    description 
+  };
   payments.push(newPayment);
   res.status(201).json({ success: true, data: newPayment });
 });
@@ -168,6 +336,12 @@ app.post("/payments", (req, res) => {
  *   put:
  *     tags: [Payments]
  *     summary: Update a payment (e.g. mark as Paid)
+ *     description: |
+ *       Updates an existing payment. Validates:
+ *       - Amount must be greater than 0 if provided
+ *       - Status must be Paid, Pending, or Overdue if provided
+ *       - paidDate is required when changing status to "Paid"
+ *       - studentID cannot be changed
  *     parameters:
  *       - in: path
  *         name: id
@@ -183,6 +357,7 @@ app.post("/payments", (req, res) => {
  *             properties:
  *               amount:
  *                 type: number
+ *                 minimum: 0.01
  *               status:
  *                 type: string
  *                 enum: [Paid, Pending, Overdue]
@@ -193,13 +368,78 @@ app.post("/payments", (req, res) => {
  *     responses:
  *       200:
  *         description: Payment updated
+ *       400:
+ *         description: Validation error
  *       404:
  *         description: Payment not found
  */
 app.put("/payments/:id", (req, res) => {
   const idx = payments.findIndex((p) => p.id === req.params.id);
   if (idx === -1) return res.status(404).json({ success: false, message: "Payment not found" });
-  payments[idx] = { ...payments[idx], ...req.body };
+
+  const { studentID, amount, status, paidDate } = req.body;
+  const updatedPayment = { ...payments[idx] };
+
+  // Prevent studentID change
+  if (studentID && studentID !== payments[idx].studentID) {
+    return res.status(400).json({ 
+      success: false, 
+      message: "studentID cannot be changed" 
+    });
+  }
+
+  // Validate amount if provided
+  if (amount !== undefined) {
+    const amountValidation = validateAmount(amount);
+    if (!amountValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: amountValidation.message 
+      });
+    }
+    updatedPayment.amount = amount;
+  }
+
+  // Validate status if provided
+  if (status !== undefined) {
+    const statusValidation = validateStatus(status);
+    if (!statusValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: statusValidation.message 
+      });
+    }
+    updatedPayment.status = statusValidation.normalized;
+  }
+
+  // Update paidDate if provided
+  if (paidDate !== undefined) {
+    if (paidDate) {
+      const date = new Date(paidDate);
+      if (isNaN(date.getTime())) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "paidDate must be a valid date format (e.g., 2026-01-15)" 
+        });
+      }
+    }
+    updatedPayment.paidDate = paidDate || null;
+  }
+
+  // Validate paidDate requirement if status is Paid
+  if (updatedPayment.status === "Paid" && !updatedPayment.paidDate) {
+    return res.status(400).json({ 
+      success: false, 
+      message: "paidDate is required when status is 'Paid'" 
+    });
+  }
+
+  // Apply other updates
+  if (req.body.description !== undefined) {
+    updatedPayment.description = req.body.description;
+  }
+
+  payments[idx] = updatedPayment;
   res.json({ success: true, data: payments[idx] });
 });
 

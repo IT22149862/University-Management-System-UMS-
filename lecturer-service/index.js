@@ -1,9 +1,19 @@
+require("dotenv").config();
 const express = require("express");
+const cors = require("cors");
 const swaggerJsdoc = require("swagger-jsdoc");
 const swaggerUi = require("swagger-ui-express");
 const { v4: uuidv4 } = require("uuid");
 
 const app = express();
+
+// ── CORS Configuration ────────────────────────────────────────────────────────
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || "*",
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+
 app.use(express.json());
 
 // ── Validation helpers ───────────────────────────────────────────────────────
@@ -380,9 +390,18 @@ app.delete("/lecturers/:id", (req, res) => {
   res.json({ success: true, message: "Lecturer deleted successfully" });
 });
 
-app.get("/health", (req, res) => res.json({ service: "lecturer-service", status: "UP" }));
+app.get("/health", (req, res) => res.json({ service: "lecturer-service", status: "UP", timestamp: new Date().toISOString() }));
 
-const PORT = 3003;
+// ── Global error handler ──────────────────────────────────────────────────────
+app.use((err, req, res, _next) => {
+  console.error(`[Lecturer Service] Error: ${err.message}`);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Internal Server Error",
+  });
+});
+
+const PORT = process.env.PORT || 3003;
 app.listen(PORT, () => {
   console.log(`✅ Lecturer Service running on http://localhost:${PORT}`);
   console.log(`📄 Swagger docs:     http://localhost:${PORT}/api-docs`);

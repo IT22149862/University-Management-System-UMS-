@@ -1,9 +1,23 @@
+require("dotenv").config();
 const express = require("express");
+const cors = require("cors");
+const axios = require("axios");
 const swaggerJsdoc = require("swagger-jsdoc");
 const swaggerUi = require("swagger-ui-express");
 const { v4: uuidv4 } = require("uuid");
 
 const app = express();
+
+// ── Service URLs for cross-validation ─────────────────────────────────────────
+const STUDENT_SERVICE_URL = process.env.STUDENT_SERVICE_URL || "http://localhost:3001";
+
+// ── CORS Configuration ────────────────────────────────────────────────────────
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || "*",
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+
 app.use(express.json());
 
 // ── Validation helpers ───────────────────────────────────────────────────────
@@ -91,6 +105,20 @@ function validateSemester(semester) {
     };
   }
   return { valid: true };
+}
+
+// ── Cross-service validation helpers ──────────────────────────────────────────
+async function validateStudentExists(studentID) {
+  try {
+    const response = await axios.get(`${STUDENT_SERVICE_URL}/students/by-student-id/${studentID}`);
+    return { exists: response.data.success, data: response.data.data };
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      return { exists: false };
+    }
+    console.error(`[Payment Service] Error validating student: ${error.message}`);
+    return { exists: false, error: "Unable to validate student" };
+  }
 }
 
 // ── In-memory store ──────────────────────────────────────────────────────────
@@ -261,73 +289,93 @@ app.get("/payments/status/:status", (req, res) => {
  *       400:
  *         description: Validation error
  */
-app.post("/payments", (req, res) => {
-  const { studentID, amount, status, semester, paidDate, description } = req.body;
-  
-  // Check required fields
-  if (!studentID || amount === undefined || !status || !semester || !description) {
-    return res.status(400).json({ 
-      success: false, 
-      message: "All fields required: studentID, amount, status, semester, description" 
-    });
-  }
+app.post("/payments", async (req, res) => {
+  try {
+    const { studentID, amount, status, semester, paidDate, description } = req.body;
+    
+    // Check required fields
+    if (!studentID || amount === undefined || !status || !semester || !description) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "All fields required: studentID, amount, status, semester, description" 
+      });
+    }
 
-  // Validate studentID format
-  const studentIDValidation = validateStudentID(studentID);
-  if (!studentIDValidation.valid) {
-    return res.status(400).json({ 
-      success: false, 
-      message: studentIDValidation.message 
-    });
-  }
+    // Validate studentID format
+    const studentIDValidation = validateStudentID(studentID);
+    if (!studentIDValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: studentIDValidation.message 
+      });
+    }
 
-  // Validate amount
-  const amountValidation = validateAmount(amount);
-  if (!amountValidation.valid) {
-    return res.status(400).json({ 
-      success: false, 
-      message: amountValidation.message 
-    });
-  }
+    // Cross-service validation: Check if student exists
+    const studentCheck = await validateStudentExists(studentID);
+    if (studentCheck.error) {
+      return res.status(503).json({ 
+        success: false, 
+        message: `Cannot validate student: ${studentCheck.error}. Please ensure student-service is running.` 
+      });
+    }
+    if (!studentCheck.exists) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Student with ID ${studentID} does not exist in the system. Please create the student first.` 
+      });
+    }
 
-  // Validate status
-  const statusValidation = validateStatus(status);
-  if (!statusValidation.valid) {
-    return res.status(400).json({ 
-      success: false, 
-      message: statusValidation.message 
-    });
-  }
+    // Validate amount
+    const amountValidation = validateAmount(amount);
+    if (!amountValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: amountValidation.message 
+      });
+    }
 
-  // Validate semester format
-  const semesterValidation = validateSemester(semester);
-  if (!semesterValidation.valid) {
-    return res.status(400).json({ 
-      success: false, 
-      message: semesterValidation.message 
-    });
-  }
+    // Validate status
+    const statusValidation = validateStatus(status);
+    if (!statusValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: statusValidation.message 
+      });
+    }
 
-  // Validate paidDate
-  const paidDateValidation = validatePaidDate(paidDate, statusValidation.normalized);
-  if (!paidDateValidation.valid) {
-    return res.status(400).json({ 
-      success: false, 
-      message: paidDateValidation.message 
-    });
-  }
+    // Validate semester format
+    const semesterValidation = validateSemester(semester);
+    if (!semesterValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: semesterValidation.message 
+      });
+    }
 
-  const newPayment = { 
-    id: uuidv4(), 
-    studentID, 
-    amount, 
-    status: statusValidation.normalized, 
-    semester, 
-    paidDate: paidDate || null, 
-    description 
-  };
-  payments.push(newPayment);
-  res.status(201).json({ success: true, data: newPayment });
+    // Validate paidDate
+    const paidDateValidation = validatePaidDate(paidDate, statusValidation.normalized);
+    if (!paidDateValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: paidDateValidation.message 
+      });
+    }
+
+    const newPayment = { 
+      id: uuidv4(), 
+      studentID, 
+      amount, 
+      status: statusValidation.normalized, 
+      semester, 
+      paidDate: paidDate || null, 
+      description 
+    };
+    payments.push(newPayment);
+    res.status(201).json({ success: true, data: newPayment });
+  } catch (error) {
+    console.error(`[Payment Service] POST /payments error: ${error.message}`);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 });
 
 /**
@@ -469,9 +517,18 @@ app.delete("/payments/:id", (req, res) => {
 });
 
 // ── Health check ─────────────────────────────────────────────────────────────
-app.get("/health", (req, res) => res.json({ service: "payment-service", status: "UP" }));
+app.get("/health", (req, res) => res.json({ service: "payment-service", status: "UP", timestamp: new Date().toISOString() }));
 
-const PORT = 3005;
+// ── Global error handler ──────────────────────────────────────────────────────
+app.use((err, req, res, _next) => {
+  console.error(`[Payment Service] Error: ${err.message}`);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Internal Server Error",
+  });
+});
+
+const PORT = process.env.PORT || 3005;
 app.listen(PORT, () => {
   console.log(`✅ Payment Service running on http://localhost:${PORT}`);
   console.log(`📄 Swagger docs:     http://localhost:${PORT}/api-docs`);

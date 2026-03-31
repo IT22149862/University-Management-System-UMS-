@@ -1,19 +1,52 @@
+require("dotenv").config();
 const express = require("express");
+const cors = require("cors");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const swaggerJsdoc = require("swagger-jsdoc");
 const swaggerUi = require("swagger-ui-express");
 
 const app = express();
+
+// ── CORS Configuration ────────────────────────────────────────────────────────
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || "*",
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+
 app.use(express.json());
 
-// ── Service URLs ─────────────────────────────────────────────────────────────
+// ── Service URLs (from environment or defaults) ───────────────────────────────
 const SERVICES = {
-  student:  "http://localhost:3001",
-  course:   "http://localhost:3002",
-  lecturer: "http://localhost:3003",
-  result:   "http://localhost:3004",
-  payment:  "http://localhost:3005",
+  student:  process.env.STUDENT_SERVICE_URL || "http://localhost:3001",
+  course:   process.env.COURSE_SERVICE_URL || "http://localhost:3002",
+  lecturer: process.env.LECTURER_SERVICE_URL || "http://localhost:3003",
+  result:   process.env.RESULT_SERVICE_URL || "http://localhost:3004",
+  payment:  process.env.PAYMENT_SERVICE_URL || "http://localhost:3005",
 };
+
+// Proxy timeout configuration (in milliseconds)
+const PROXY_TIMEOUT = parseInt(process.env.PROXY_TIMEOUT) || 30000;
+
+// ── Proxy error handler ───────────────────────────────────────────────────────
+const onProxyError = (err, req, res) => {
+  console.error(`[Gateway] Proxy error: ${err.message} for ${req.method} ${req.originalUrl}`);
+  res.status(503).json({
+    success: false,
+    message: "Service temporarily unavailable",
+    error: process.env.NODE_ENV === "development" ? err.message : undefined,
+  });
+};
+
+// ── Proxy options factory ─────────────────────────────────────────────────────
+const createProxyOptions = (target, pathRewriteKey, pathRewriteValue) => ({
+  target,
+  changeOrigin: true,
+  timeout: PROXY_TIMEOUT,
+  proxyTimeout: PROXY_TIMEOUT,
+  pathRewrite: { [pathRewriteKey]: pathRewriteValue },
+  onError: onProxyError,
+});
 
 // ── Request logger middleware ─────────────────────────────────────────────────
 app.use((req, _res, next) => {
@@ -22,11 +55,11 @@ app.use((req, _res, next) => {
 });
 
 // ── Proxy routes ─────────────────────────────────────────────────────────────
-app.use("/api/students",  createProxyMiddleware({ target: SERVICES.student,  changeOrigin: true, pathRewrite: { "^/api/students": "/students" } }));
-app.use("/api/courses",   createProxyMiddleware({ target: SERVICES.course,   changeOrigin: true, pathRewrite: { "^/api/courses":  "/courses"  } }));
-app.use("/api/lecturers", createProxyMiddleware({ target: SERVICES.lecturer, changeOrigin: true, pathRewrite: { "^/api/lecturers": "/lecturers" } }));
-app.use("/api/results",   createProxyMiddleware({ target: SERVICES.result,   changeOrigin: true, pathRewrite: { "^/api/results":  "/results"  } }));
-app.use("/api/payments",  createProxyMiddleware({ target: SERVICES.payment,  changeOrigin: true, pathRewrite: { "^/api/payments": "/payments" } }));
+app.use("/api/students",  createProxyMiddleware(createProxyOptions(SERVICES.student, "^/api/students", "/students")));
+app.use("/api/courses",   createProxyMiddleware(createProxyOptions(SERVICES.course, "^/api/courses", "/courses")));
+app.use("/api/lecturers", createProxyMiddleware(createProxyOptions(SERVICES.lecturer, "^/api/lecturers", "/lecturers")));
+app.use("/api/results",   createProxyMiddleware(createProxyOptions(SERVICES.result, "^/api/results", "/results")));
+app.use("/api/payments",  createProxyMiddleware(createProxyOptions(SERVICES.payment, "^/api/payments", "/payments")));
 
 // ── Swagger config for Gateway ────────────────────────────────────────────────
 const swaggerOptions = {
@@ -679,15 +712,24 @@ app.get("/health", (req, res) => {
   res.json({ service: "api-gateway", status: "UP", timestamp: new Date().toISOString() });
 });
 
-const PORT = 3000;
+// ── Global error handler ──────────────────────────────────────────────────────
+app.use((err, req, res, _next) => {
+  console.error(`[Gateway] Error: ${err.message}`);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Internal Server Error",
+  });
+});
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ API Gateway running on http://localhost:${PORT}`);
   console.log(`📄 Gateway Swagger:  http://localhost:${PORT}/api-docs`);
   console.log(`\n📡 Routing table:`);
-  console.log(`   /api/students  → Student Service  :3001 (studentID: IT/EN/BS + 8 digits)`);
-  console.log(`   /api/courses   → Course Service   :3002 (courseID: IT/EN/BS + 4 digits)`);
-  console.log(`   /api/lecturers → Lecturer Service :3003 (lecturerID: IT/EN/BS + 4 digits)`);
-  console.log(`   /api/results   → Result Service   :3004 (grade auto-calculated)`);
-  console.log(`   /api/payments  → Payment Service  :3005 (status: Paid/Pending/Overdue)`);
+  console.log(`   /api/students  → Student Service  (${SERVICES.student})`);
+  console.log(`   /api/courses   → Course Service   (${SERVICES.course})`);
+  console.log(`   /api/lecturers → Lecturer Service (${SERVICES.lecturer})`);
+  console.log(`   /api/results   → Result Service   (${SERVICES.result})`);
+  console.log(`   /api/payments  → Payment Service  (${SERVICES.payment})`);
   console.log(`\n🚀 Start each service manually with 'npm start' in their folders`);
 });

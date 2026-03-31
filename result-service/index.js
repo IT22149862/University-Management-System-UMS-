@@ -1,9 +1,24 @@
+require("dotenv").config();
 const express = require("express");
+const cors = require("cors");
+const axios = require("axios");
 const swaggerJsdoc = require("swagger-jsdoc");
 const swaggerUi = require("swagger-ui-express");
 const { v4: uuidv4 } = require("uuid");
 
 const app = express();
+
+// ── Service URLs for cross-validation ─────────────────────────────────────────
+const STUDENT_SERVICE_URL = process.env.STUDENT_SERVICE_URL || "http://localhost:3001";
+const COURSE_SERVICE_URL = process.env.COURSE_SERVICE_URL || "http://localhost:3002";
+
+// ── CORS Configuration ────────────────────────────────────────────────────────
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || "*",
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+
 app.use(express.json());
 
 // ── Validation helpers ───────────────────────────────────────────────────────
@@ -107,6 +122,33 @@ function validateMarks(marks) {
     return { valid: false, message: "Marks cannot exceed 100 (must be 0-100)" };
   }
   return { valid: true };
+}
+
+// ── Cross-service validation helpers ──────────────────────────────────────────
+async function validateStudentExists(studentID) {
+  try {
+    const response = await axios.get(`${STUDENT_SERVICE_URL}/students/by-student-id/${studentID}`);
+    return { exists: response.data.success, data: response.data.data };
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      return { exists: false };
+    }
+    console.error(`[Result Service] Error validating student: ${error.message}`);
+    return { exists: false, error: "Unable to validate student" };
+  }
+}
+
+async function validateCourseExists(courseID) {
+  try {
+    const response = await axios.get(`${COURSE_SERVICE_URL}/courses/by-course-id/${courseID}`);
+    return { exists: response.data.success, data: response.data.data };
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      return { exists: false };
+    }
+    console.error(`[Result Service] Error validating course: ${error.message}`);
+    return { exists: false, error: "Unable to validate course" };
+  }
 }
 
 // ── In-memory store ──────────────────────────────────────────────────────────
@@ -320,70 +362,105 @@ app.get("/results/calculate-grade/:marks", (req, res) => {
  *       400:
  *         description: Validation error
  */
-app.post("/results", (req, res) => {
-  const { studentID, courseID, marks, semester } = req.body;
-  
-  // Check required fields (grade is NOT required - it's auto-calculated)
-  if (!studentID || !courseID || marks === undefined || !semester) {
-    return res.status(400).json({ 
-      success: false, 
-      message: "All fields required: studentID, courseID, marks, semester (grade is auto-calculated)" 
-    });
+app.post("/results", async (req, res) => {
+  try {
+    const { studentID, courseID, marks, semester } = req.body;
+    
+    // Check required fields (grade is NOT required - it's auto-calculated)
+    if (!studentID || !courseID || marks === undefined || !semester) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "All fields required: studentID, courseID, marks, semester (grade is auto-calculated)" 
+      });
+    }
+
+    // Validate studentID format
+    const studentIDValidation = validateStudentID(studentID);
+    if (!studentIDValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: studentIDValidation.message 
+      });
+    }
+
+    // Validate courseID format
+    const courseIDValidation = validateCourseID(courseID);
+    if (!courseIDValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: courseIDValidation.message 
+      });
+    }
+
+    // Validate semester
+    const semesterValidation = validateSemester(semester);
+    if (!semesterValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: semesterValidation.message 
+      });
+    }
+
+    // Validate marks
+    const marksValidation = validateMarks(marks);
+    if (!marksValidation.valid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: marksValidation.message 
+      });
+    }
+
+    // Cross-service validation: Check if student exists
+    const studentCheck = await validateStudentExists(studentID);
+    if (studentCheck.error) {
+      return res.status(503).json({ 
+        success: false, 
+        message: `Cannot validate student: ${studentCheck.error}. Please ensure student-service is running.` 
+      });
+    }
+    if (!studentCheck.exists) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Student with ID ${studentID} does not exist in the system. Please create the student first.` 
+      });
+    }
+
+    // Cross-service validation: Check if course exists
+    const courseCheck = await validateCourseExists(courseID);
+    if (courseCheck.error) {
+      return res.status(503).json({ 
+        success: false, 
+        message: `Cannot validate course: ${courseCheck.error}. Please ensure course-service is running.` 
+      });
+    }
+    if (!courseCheck.exists) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Course with ID ${courseID} does not exist in the system. Please create the course first.` 
+      });
+    }
+
+    // Auto-calculate grade from marks
+    const grade = calculateGradeFromMarks(marks);
+
+    // Check for duplicate result (same student + course)
+    const duplicate = results.find(
+      r => r.studentID === studentID && r.courseID === courseID
+    );
+    if (duplicate) {
+      return res.status(400).json({
+        success: false,
+        message: `Student ${studentID} already has a result for course ${courseID}. A student can only have one result per course.`
+      });
+    }
+
+    const newResult = { id: uuidv4(), studentID, courseID, grade, marks, semester: semesterValidation.normalized };
+    results.push(newResult);
+    res.status(201).json({ success: true, data: newResult });
+  } catch (error) {
+    console.error(`[Result Service] POST /results error: ${error.message}`);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
-
-  // Validate studentID format
-  const studentIDValidation = validateStudentID(studentID);
-  if (!studentIDValidation.valid) {
-    return res.status(400).json({ 
-      success: false, 
-      message: studentIDValidation.message 
-    });
-  }
-
-  // Validate courseID format
-  const courseIDValidation = validateCourseID(courseID);
-  if (!courseIDValidation.valid) {
-    return res.status(400).json({ 
-      success: false, 
-      message: courseIDValidation.message 
-    });
-  }
-
-  // Validate semester
-  const semesterValidation = validateSemester(semester);
-  if (!semesterValidation.valid) {
-    return res.status(400).json({ 
-      success: false, 
-      message: semesterValidation.message 
-    });
-  }
-
-  // Validate marks
-  const marksValidation = validateMarks(marks);
-  if (!marksValidation.valid) {
-    return res.status(400).json({ 
-      success: false, 
-      message: marksValidation.message 
-    });
-  }
-
-  // Auto-calculate grade from marks
-  const grade = calculateGradeFromMarks(marks);
-
-  // Check for duplicate result (same student + course)
-  const duplicate = results.find(
-    r => r.studentID === studentID && r.courseID === courseID
-  );
-  if (duplicate) {
-    return res.status(400).json({
-      success: false,
-      message: `Student ${studentID} already has a result for course ${courseID}. A student can only have one result per course.`
-    });
-  }
-
-  const newResult = { id: uuidv4(), studentID, courseID, grade, marks, semester: semesterValidation.normalized };
-  results.push(newResult);
-  res.status(201).json({ success: true, data: newResult });
 });
 
 /**
@@ -504,9 +581,18 @@ app.delete("/results/:id", (req, res) => {
   res.json({ success: true, message: "Result deleted successfully" });
 });
 
-app.get("/health", (req, res) => res.json({ service: "result-service", status: "UP" }));
+app.get("/health", (req, res) => res.json({ service: "result-service", status: "UP", timestamp: new Date().toISOString() }));
 
-const PORT = 3004;
+// ── Global error handler ──────────────────────────────────────────────────────
+app.use((err, req, res, _next) => {
+  console.error(`[Result Service] Error: ${err.message}`);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Internal Server Error",
+  });
+});
+
+const PORT = process.env.PORT || 3004;
 app.listen(PORT, () => {
   console.log(`✅ Result Service running on http://localhost:${PORT}`);
   console.log(`📄 Swagger docs:     http://localhost:${PORT}/api-docs`);
